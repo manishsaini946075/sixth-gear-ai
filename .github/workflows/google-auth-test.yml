@@ -1,5 +1,5 @@
 
-name: SIXTH GEAR VI - Google Authentication Test
+name: SIXTH GEAR VI - Google Drive Connection Test
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   id-token: write
 
 jobs:
-  google-auth:
+  google-drive-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,13 +20,23 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Authenticate with Google Cloud
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
 
-      - name: Verify Google Cloud authentication
-        uses: google-github-actions/setup-gcloud@v2
+      - name: Test Google Drive API
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          response=$(curl --fail-with-body -sS \
+            -H "Authorization: Bearer ${DRIVE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files?pageSize=100&fields=files(id,name,mimeType)&q=trashed%3Dfalse")
 
-      - name: Check authenticated account
-        run: gcloud auth list
+          count=$(echo "$response" | jq '.files | length')
+
+          echo "Google Drive API connection successful!"
+          echo "Accessible files and folders: $count"
