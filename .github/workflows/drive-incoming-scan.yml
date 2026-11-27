@@ -1,0 +1,74 @@
+
+name: SIXTH GEAR VI - Incoming Video Scanner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  scan-incoming:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authenticate with Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+
+      - name: Scan 01_INCOMING folder
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          API="https://www.googleapis.com/drive/v3/files"
+
+          root=$(curl -fsSG "$API" \
+            -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+            --data-urlencode "q=name='SIXTH_GEAR_VI' and mimeType='application/vnd.google-apps.folder' and trashed=false" \
+            --data-urlencode "fields=files(id)" \
+            --data-urlencode "pageSize=100")
+
+          root_id=$(echo "$root" | jq -r '.files[0].id // empty')
+
+          if [[ -z "$root_id" ]]; then
+            echo "ERROR: Main folder not found."
+            exit 1
+          fi
+
+          incoming=$(curl -fsSG "$API" \
+            -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+            --data-urlencode "q='$root_id' in parents and name='01_INCOMING' and mimeType='application/vnd.google-apps.folder' and trashed=false" \
+            --data-urlencode "fields=files(id)" \
+            --data-urlencode "pageSize=100")
+
+          folder_id=$(echo "$incoming" | jq -r '.files[0].id // empty')
+
+          if [[ -z "$folder_id" ]]; then
+            echo "ERROR: 01_INCOMING folder not found."
+            exit 1
+          fi
+
+          files=$(curl -fsSG "$API" \
+            -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+            --data-urlencode "q='$folder_id' in parents and trashed=false" \
+            --data-urlencode "fields=files(id,name,mimeType,modifiedTime)" \
+            --data-urlencode "pageSize=100")
+
+          echo "===== SIXTH GEAR VI: INCOMING FILES ====="
+          echo "$files" | jq -r \
+            '.files[]? | "\(.name) | \(.mimeType) | \(.id) | \(.modifiedTime)"'
+
+          count=$(echo "$files" | jq '.files | length')
+
+          echo "========================================="
+          echo "Incoming files detected: $count"
+          echo "Incoming folder scan completed successfully!"
