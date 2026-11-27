@@ -1,0 +1,45 @@
+
+name: SIXTH GEAR VI - YouTube OAuth Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-youtube-auth:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify YouTube OAuth
+        env:
+          CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$CLIENT_ID" || -z "$CLIENT_SECRET" || -z "$REFRESH_TOKEN" ]]; then
+            echo "Required GitHub Secrets are missing."
+            exit 1
+          fi
+
+          response=$(curl --silent --show-error --fail-with-body \
+            --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_secret=$CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$REFRESH_TOKEN" \
+            --data-urlencode "grant_type=refresh_token" \
+            https://oauth2.googleapis.com/token)
+
+          access_token=$(echo "$response" | jq -r '.access_token // empty')
+
+          if [[ -z "$access_token" ]]; then
+            echo "OAuth token verification failed."
+            exit 1
+          fi
+
+          echo "YouTube OAuth authentication successful!"
+          unset response access_token
