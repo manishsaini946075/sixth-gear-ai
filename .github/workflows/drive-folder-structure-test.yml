@@ -1,0 +1,80 @@
+
+name: SIXTH GEAR VI - Drive Folder Structure Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify-folders:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authenticate with Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+
+      - name: Verify Drive folders
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          API="https://www.googleapis.com/drive/v3/files"
+
+          root=$(curl -fsSG "$API" \
+            -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+            --data-urlencode "q=name='SIXTH_GEAR_VI' and mimeType='application/vnd.google-apps.folder' and trashed=false" \
+            --data-urlencode "fields=files(id,name)" \
+            --data-urlencode "pageSize=100")
+
+          root_id=$(echo "$root" | jq -r '.files[0].id // empty')
+
+          if [[ -z "$root_id" ]]; then
+            echo "SIXTH_GEAR_VI folder not found or inaccessible."
+            exit 1
+          fi
+
+          children=$(curl -fsSG "$API" \
+            -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+            --data-urlencode "q='$root_id' in parents and trashed=false" \
+            --data-urlencode "fields=files(id,name,mimeType)" \
+            --data-urlencode "pageSize=100")
+
+          echo "Visible folders:"
+          echo "$children" | jq -r \
+            '.files[] | select(.mimeType=="application/vnd.google-apps.folder") | " - \(.name)"'
+
+          expected='[
+            "01_INCOMING",
+            "02_LICENSED_SOURCES",
+            "03_PROCESSING",
+            "04_APPROVED",
+            "05_QUARANTINE",
+            "06_PUBLISHED",
+            "07_REPORTS"
+          ]'
+
+          actual=$(echo "$children" | jq '[.files[] | select(.mimeType=="application/vnd.google-apps.folder") | .name]')
+
+          missing=$(jq -n \
+            --argjson expected "$expected" \
+            --argjson actual "$actual" \
+            '$expected - $actual | .[]')
+
+          if [[ -n "$missing" ]]; then
+            echo "Missing folders:"
+            echo "$missing"
+            exit 1
+          fi
+
+          echo "All seven SIXTH GEAR VI folders verified!"
